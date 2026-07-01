@@ -1,0 +1,602 @@
+"use client";
+
+import React, { useRef, useLayoutEffect, useEffect, useMemo, useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
+import { motion } from "framer-motion";
+import { Button } from "@heroui/button";
+import { Chip } from "@heroui/chip";
+import {
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  useDisclosure,
+} from "@heroui/modal";
+import { Input } from "@heroui/input";
+import {
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem,
+  DropdownSection,
+} from "@heroui/dropdown";
+import { addToast } from "@heroui/toast";
+import {
+  GraduationCap,
+  Search,
+  Wand2,
+  ArrowLeft,
+  FolderPlus,
+  LayoutDashboard,
+  Plus,
+} from "lucide-react";
+import { JustifiedGallery, type Photo } from "./JustifiedGallery";
+import { Squircle } from "@/components/Squircle";
+import { VideoVisibilityProvider } from "@/hooks/use-video-visibility";
+import {
+  MOCK_VIDEO_DETAIL,
+  extractVideoDetailHeading,
+  type VideoDetailData,
+} from "./video-detail-data";
+import {
+  useGetVideoDetailQuery,
+  useGetSimilarContentQuery,
+  type ContentLabel,
+  type SimilarContentItem,
+} from "@/lib/redux/services/api";
+import { getContentUrl } from "@/lib/config/video.config";
+import { useUserSetting } from "@/lib/user-settings";
+import { useCollections } from "@/hooks/use-collections";
+import { useFeatureFlag } from "@/lib/feature-flags";
+import { hasWriteAccess } from "@/lib/permissions";
+import SendToDesktopModal from "@/components/desktop/SendToDesktopModal";
+import { dispatchSuggestionBubble } from "@/components/chat/suggestion-bubble-types";
+import { BROWSE_VIDEO_ACTIONS } from "@/config/suggestion-bubbles";
+import { isImageContentType, normalizeMediaType } from "@/lib/media";
+
+const ACTION_ICONS = {
+  learn: GraduationCap,
+  explore: Search,
+  create: Wand2,
+  collection: FolderPlus,
+  desktop: LayoutDashboard,
+} as const;
+
+
+function groupLabelsByProperty(labels: ContentLabel[]): Record<string, string[]> {
+  const groups: Record<string, string[]> = {};
+  for (const label of labels) {
+    const path = label.property_path;
+    if (!path) {
+      (groups["Other"] ??= []).push(label.value);
+      continue;
+    }
+    const segments = path.split(".");
+    const groupKey = segments.slice(-2).join(" > ");
+    (groups[groupKey] ??= []).push(label.value);
+  }
+  return groups;
+}
+
+interface MetadataItemProps {
+  label: string;
+  value: string;
+}
+
+function MetadataItem({ label, value }: MetadataItemProps) {
+  return (
+    <div className="mb-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-default-400 dark:text-default-500">
+        {label}
+      </span>
+      <span className="block text-[13px] text-default-700 dark:text-default-600 leading-snug">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+interface VideoDetailViewProps {
+  selectedPhoto: Photo;
+  onClose: () => void;
+  onTargetReady: (rect: DOMRect) => void;
+  videoVisible: boolean;
+  desktopId?: string;
+  onContextMenu?: (photo: Photo, e: React.MouseEvent) => void;
+}
+
+const similarItemToPhoto = (
+  item: SimilarContentItem,
+  cnMode: boolean
+): Photo & { similarityAggregate?: number } => ({
+  src: getContentUrl(item.storage_key, cnMode),
+  width: item.width,
+  height: item.height,
+  id: item.id,
+  key: item.id.toString(),
+  alt: item.content_uuid,
+  videoName: item.content_uuid,
+  storageKey: item.storage_key,
+  mediaType: normalizeMediaType(item.content_type),
+  similarityAggregate: item.similarity_score?.aggregate,
+});
+
+export function VideoDetailView({
+  selectedPhoto,
+  onClose,
+  onTargetReady,
+  videoVisible,
+  desktopId,
+  onContextMenu,
+}: VideoDetailViewProps) {
+  const [photoStack, setPhotoStack] = useState<Photo[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const currentPhoto = photoStack.length > 0 ? photoStack[photoStack.length - 1] : selectedPhoto;
+
+  const handleSimilarClick = useCallback((photo: Photo) => {
+    setPhotoStack((prev) => [...prev, photo]);
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const isFirstLevel = photoStack.length === 0;
+
+  return (
+    <div ref={scrollContainerRef} className="w-full relative">
+      {/* Sticky back button — always returns to the browse grid */}
+      <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md pb-2 pt-1">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 text-sm text-default-500 hover:text-default-700 dark:text-default-500 dark:hover:text-default-700 transition-colors"
+        >
+          <ArrowLeft size={16} />
+          <span>Back to results</span>
+        </button>
+      </div>
+
+      <VideoDetailContent
+        key={currentPhoto.key}
+        selectedPhoto={currentPhoto}
+        onTargetReady={isFirstLevel ? onTargetReady : () => {}}
+        videoVisible={isFirstLevel ? videoVisible : true}
+        desktopId={desktopId}
+        onSimilarClick={handleSimilarClick}
+        onContextMenu={onContextMenu}
+      />
+    </div>
+  );
+}
+
+interface VideoDetailContentProps {
+  selectedPhoto: Photo;
+  onTargetReady: (rect: DOMRect) => void;
+  videoVisible: boolean;
+  desktopId?: string;
+  onSimilarClick: (photo: Photo) => void;
+  onContextMenu?: (photo: Photo, e: React.MouseEvent) => void;
+}
+
+function VideoDetailContent({
+  selectedPhoto,
+  onTargetReady,
+  videoVisible,
+  desktopId,
+  onSimilarClick,
+  onContextMenu,
+}: VideoDetailContentProps) {
+  const cnMode = useUserSetting("cnMode");
+  const detail: VideoDetailData = MOCK_VIDEO_DETAIL;
+  const videoTargetRef = useRef<HTMLDivElement>(null);
+  const { data: videoDetail, isLoading: isLoadingDetail } = useGetVideoDetailQuery(selectedPhoto.id);
+  const {
+    data: similarData,
+    isLoading: isLoadingSimilar,
+    isFetching: isFetchingSimilar,
+  } = useGetSimilarContentQuery(selectedPhoto.id);
+  const tCollections = useTranslations("collections");
+
+  const similarPhotos = useMemo(
+    () => (similarData?.content ?? []).map((item) => similarItemToPhoto(item, cnMode)),
+    [similarData, cnMode]
+  );
+  const missingCaptionTypes = similarData?.anchor?.missing_caption_types ?? [];
+
+  const showDesktop = useFeatureFlag<boolean>("user_desktop") ?? false;
+  const {
+    collections,
+    addPublicVideoToCollection,
+    addPublicImageToCollection,
+    createCollection,
+    getDefaultCollectionName,
+  } = useCollections();
+
+  const {
+    isOpen: isCreateCollectionOpen,
+    onOpen: onCreateCollectionOpen,
+    onOpenChange: onCreateCollectionOpenChange,
+  } = useDisclosure();
+
+  const {
+    isOpen: isDesktopOpen,
+    onOpen: onDesktopOpen,
+    onOpenChange: onDesktopOpenChange,
+  } = useDisclosure();
+
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+
+  const groupedLabels = useMemo(() => {
+    if (!videoDetail?.labels) return {};
+    return groupLabelsByProperty(videoDetail.labels);
+  }, [videoDetail?.labels]);
+
+  const labelEntries = useMemo(() => Object.entries(groupedLabels), [groupedLabels]);
+
+  const heading = useMemo(
+    () => extractVideoDetailHeading(videoDetail?.metadata),
+    [videoDetail?.metadata]
+  );
+
+  const chatActions = useMemo(
+    () => detail.actions.filter((a) => a.icon !== "collection" && a.icon !== "desktop"),
+    [detail.actions]
+  );
+
+  useLayoutEffect(() => {
+    if (videoTargetRef.current) {
+      onTargetReady(videoTargetRef.current.getBoundingClientRect());
+    }
+  }, [onTargetReady]);
+
+  const videoTitle = videoDetail?.content_uuid ?? selectedPhoto.videoName ?? "Untitled";
+  const storageKey = videoDetail?.storage_key ?? "";
+  const contentUuid = videoDetail?.content_uuid ?? "";
+  const mediaType = normalizeMediaType(videoDetail?.content_type ?? selectedPhoto.mediaType);
+  const isImageContent = isImageContentType(mediaType);
+
+  const handleAddToCollection = async (collectionId: string) => {
+    if (!storageKey || !contentUuid) return;
+    const success = isImageContent
+      ? await addPublicImageToCollection(collectionId, storageKey, contentUuid, videoTitle)
+      : await addPublicVideoToCollection(collectionId, storageKey, contentUuid, videoTitle);
+    if (success) {
+      addToast({
+        title: "Added to collection",
+        description: `${isImageContent ? "Image" : "Video"} has been added to the collection`,
+        color: "success",
+      });
+    } else {
+      addToast({
+        title: "Error",
+        description: `Failed to add ${isImageContent ? "image" : "video"} to collection`,
+        color: "danger",
+      });
+    }
+  };
+
+  const handleCreateAndAdd = async () => {
+    if (!newCollectionName.trim() || !storageKey || !contentUuid) return;
+    setIsCreating(true);
+    try {
+      const collection = await createCollection(newCollectionName.trim());
+      if (collection) {
+        const success = isImageContent
+          ? await addPublicImageToCollection(collection.id, storageKey, contentUuid, videoTitle)
+          : await addPublicVideoToCollection(collection.id, storageKey, contentUuid, videoTitle);
+        if (success) {
+          addToast({
+            title: "Added to collection",
+            description: `${isImageContent ? "Image" : "Video"} added to "${collection.name}"`,
+            color: "success",
+          });
+        }
+        setNewCollectionName("");
+        onCreateCollectionOpenChange();
+      }
+    } catch (error: any) {
+      const msg = error?.status === 409 ? tCollections("duplicateName") : tCollections("createFailed");
+      addToast({ title: tCollections("error"), description: msg, color: "danger" });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const writableCollections = collections.filter((c) => hasWriteAccess(c.permission));
+
+  return (
+    <div className="w-full @container">
+      {/* Top section: Video + Info — side by side when the container is wide
+          (full browse page), stacked vertically when narrow (canvas left panel). */}
+      <div className="flex flex-col @2xl:flex-row gap-6 mb-6">
+        {/* Video player area */}
+        <div className="@2xl:w-[55%] @2xl:shrink-0">
+          <Squircle
+            ref={videoTargetRef}
+            className="relative overflow-hidden"
+            style={{
+              aspectRatio: `${selectedPhoto.width} / ${selectedPhoto.height}`,
+            }}
+            onContextMenu={onContextMenu ? (e) => onContextMenu(selectedPhoto, e) : undefined}
+          >
+            <div className={`w-full h-full ${videoVisible ? "visible" : "invisible"}`}>
+              {isImageContent ? (
+                <img
+                  src={selectedPhoto.src}
+                  alt={selectedPhoto.alt}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <video
+                  src={selectedPhoto.src}
+                  className="w-full h-full object-cover"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                />
+              )}
+            </div>
+
+            <motion.div
+              className="absolute top-3 right-3 flex gap-2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.2 }}
+            >
+              <Dropdown>
+                <DropdownTrigger>
+                  <button
+                    className="p-2 rounded-md bg-black/50 hover:bg-black/70 transition-colors disabled:opacity-50"
+                    disabled={!videoDetail || isLoadingDetail}
+                  >
+                    <FolderPlus size={16} className="text-white" />
+                  </button>
+                </DropdownTrigger>
+                <DropdownMenu
+                  aria-label="Add to collection"
+                  onAction={(key) => {
+                    if (key === "create-new") {
+                      setNewCollectionName(getDefaultCollectionName());
+                      onCreateCollectionOpen();
+                    }
+                  }}
+                >
+                  <DropdownSection title="Add to Collection" showDivider>
+                    <DropdownItem
+                      key="create-new"
+                      startContent={<Plus size={16} />}
+                      className="font-semibold"
+                    >
+                      Create new collection
+                    </DropdownItem>
+                  </DropdownSection>
+                  <DropdownSection
+                    title={writableCollections.length > 0 ? "Your Collections" : undefined}
+                  >
+                    {writableCollections.length === 0 ? (
+                      <DropdownItem key="no-collections" isReadOnly>
+                        <span className="text-xs text-default-400">
+                          No collections yet
+                        </span>
+                      </DropdownItem>
+                    ) : (
+                      writableCollections.map((collection) => (
+                        <DropdownItem
+                          key={collection.id}
+                          startContent={<FolderPlus size={16} />}
+                          onPress={() => handleAddToCollection(collection.id)}
+                        >
+                          {collection.name}
+                        </DropdownItem>
+                      ))
+                    )}
+                  </DropdownSection>
+                </DropdownMenu>
+              </Dropdown>
+
+              {showDesktop && (
+                <button
+                  className="p-2 rounded-md bg-black/50 hover:bg-black/70 transition-colors disabled:opacity-50"
+                  disabled={!videoDetail || isLoadingDetail}
+                  onClick={onDesktopOpen}
+                >
+                  <LayoutDashboard size={16} className="text-white" />
+                </button>
+              )}
+            </motion.div>
+          </Squircle>
+        </div>
+
+        {/* Info panel */}
+        <motion.div
+          className="flex-1 min-w-0"
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.2, duration: 0.4 }}
+        >
+          <div className="mb-4 min-h-[3rem]">
+            {isLoadingDetail ? (
+              <>
+                <div className="h-7 w-2/3 mb-1.5 rounded-md bg-default-200 animate-pulse" />
+                <div className="h-4 w-1/3 rounded-md bg-default-200 animate-pulse" />
+              </>
+            ) : (
+              <>
+                {heading.primary && (
+                  <h2 className="text-xl font-bold text-foreground mb-0.5">{heading.primary}</h2>
+                )}
+                {heading.secondary && (
+                  <p className="text-sm text-default-400 dark:text-default-500">{heading.secondary}</p>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Chat-based actions */}
+          <div className="flex flex-col gap-2 mb-5">
+            {chatActions.map((action) => {
+              const Icon = ACTION_ICONS[action.icon];
+              return (
+                <Button
+                  key={action.label}
+                  variant="bordered"
+                  className="justify-center gap-3 items-center border-default-300 dark:border-default-500 text-default-700 dark:text-default-600 hover:bg-default-100 dark:hover:bg-white/10 w-full"
+                  startContent={<Icon size={18} />}
+                  isDisabled={!videoDetail || isLoadingDetail || isImageContent}
+                  onPress={videoDetail && !isImageContent ? () => {
+                    const factory = BROWSE_VIDEO_ACTIONS[action.icon];
+                    if (factory) {
+                      const bubble = factory({
+                        contentId: videoDetail.id,
+                        contentUuid: videoDetail.content_uuid,
+                        storageKey: videoDetail.storage_key,
+                        videoUrl: getContentUrl(videoDetail.storage_key, cnMode),
+                      });
+                      dispatchSuggestionBubble(bubble.action, bubble.label, bubble.icon);
+                    }
+                  } : undefined}
+                >
+                  {action.label}
+                </Button>
+              );
+            })}
+          </div>
+
+          <div className="mb-1">
+            <span className="text-xs text-default-400 dark:text-default-500">Topics to ask agent:</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {detail.topics.map((topic) => (
+              <Chip
+                key={topic.label}
+                size="sm"
+                variant="bordered"
+                className="border-default-300 dark:border-default-500 text-default-600 dark:text-default-600 text-[11px] cursor-pointer hover:bg-default-100 dark:hover:bg-white/10"
+              >
+                &ldquo;{topic.label}&rdquo;
+              </Chip>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Metadata section */}
+      <motion.div
+        className="mb-8 px-1 max-h-[320px] overflow-y-auto"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: 0.4 }}
+      >
+        {isLoadingDetail ? (
+          <div className="text-sm text-default-400">Loading metadata…</div>
+        ) : labelEntries.length > 0 ? (
+          <div className="grid grid-cols-1 @md:grid-cols-3 gap-x-8 gap-y-1">
+            {labelEntries.map(([group, values]) => (
+              <MetadataItem key={group} label={group} value={values.join(", ")} />
+            ))}
+          </div>
+        ) : null}
+      </motion.div>
+
+      {/* Similar Shots — driven by /api/content/<id>/similar */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4, duration: 0.4 }}
+      >
+        <div className="flex items-baseline justify-between mb-4">
+          <h3 className="text-sm font-semibold uppercase tracking-widest text-default-400 dark:text-default-500">
+            Similar Shots
+          </h3>
+          {missingCaptionTypes.length > 0 && (
+            <span className="text-[10px] text-default-400">
+              Limited relevance: missing {missingCaptionTypes.join(", ")}
+            </span>
+          )}
+        </div>
+
+        {(isLoadingSimilar || isFetchingSimilar) && similarPhotos.length === 0 ? (
+          <div className="text-sm text-default-400 py-4">Finding similar items…</div>
+        ) : similarPhotos.length === 0 ? (
+          <div className="text-sm text-default-400 py-4">No similar items found.</div>
+        ) : (
+          <VideoVisibilityProvider>
+            <JustifiedGallery
+              photos={similarPhotos}
+              targetRowHeight={140}
+              spacing={4}
+              onClick={onSimilarClick}
+              onContextMenu={onContextMenu}
+            />
+          </VideoVisibilityProvider>
+        )}
+      </motion.div>
+
+      {/* Create Collection Modal */}
+      <Modal isOpen={isCreateCollectionOpen} onOpenChange={onCreateCollectionOpenChange}>
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>Create New Collection</ModalHeader>
+              <ModalBody>
+                <Input
+                  label="Collection name"
+                  placeholder="Enter collection name"
+                  value={newCollectionName}
+                  onValueChange={setNewCollectionName}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateAndAdd();
+                  }}
+                  autoFocus
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  color="primary"
+                  onPress={handleCreateAndAdd}
+                  isLoading={isCreating}
+                  isDisabled={!newCollectionName.trim()}
+                >
+                  Create & Add
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* Send to Desktop Modal */}
+      <SendToDesktopModal
+        isOpen={isDesktopOpen}
+        onOpenChange={onDesktopOpenChange}
+        desktopId={desktopId}
+        assets={videoDetail ? [
+          {
+            assetType: isImageContent
+              ? ("public_image" as const)
+              : ("public_video" as const),
+            metadata: {
+              storageKey: videoDetail.storage_key,
+              contentUuid: videoDetail.content_uuid,
+              title: videoTitle,
+              width: selectedPhoto.width,
+              height: selectedPhoto.height,
+            },
+          },
+        ] : []}
+      />
+    </div>
+  );
+}

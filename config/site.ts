@@ -1,0 +1,126 @@
+export type SiteConfig = typeof siteConfig;
+
+export const siteConfig = {
+  name: "moodio agent",
+  description: "moodio agent",
+  chatInputPrefix: "moodio_chat_draft_",
+  // Active chat tracking for cross-page continuity
+  activeChatId: "moodio_active_chat_id",
+  // Chat side panel collapse state (defaults to expanded)
+  chatPanelCollapsed: "moodio_chat_panel_collapsed",
+  // Chat side panel width (for resizable panel)
+  chatPanelWidth: "moodio_chat_panel_width",
+  // Canvas left side panel (inspiration + tree view) collapse state
+  leftPanelCollapsed: "moodio_left_panel_collapsed",
+  // Canvas left side panel width (for resizable panel)
+  leftPanelWidth: "moodio_left_panel_width",
+  // Canvas left side panel per-section flex weights (for resizable sections)
+  leftPanelSectionWeights: "moodio_left_panel_section_weights",
+  // Canvas layout mode: "free" (saved coords) or "organized" (zone-grouped flow)
+  canvasLayoutMode: "moodio_canvas_layout_mode",
+  navItems: [
+    {
+      label: "Home",
+      href: "/",
+    },
+  ],
+  navMenuItems: [
+    {
+      label: "Home",
+      href: "/",
+    },
+  ],
+  links: {
+    github: "https://github.com/moodio-ai",
+  },
+
+  // Authentication Configuration
+  auth: {
+    // JWT Access Token Configuration
+    accessToken: {
+      expiresIn: "30m", // 30 minutes (jose format: "30m", "1h", "1d", etc.)
+      cookieName: "moodio_access_token",
+      maxAge: 30 * 60, // 30 minutes in seconds
+    },
+    // Allow small clock skew on backend verification
+    clockSkewSeconds: 60,
+
+    // Refresh Token Configuration
+    refreshToken: {
+      expiresInDays: 20, // 20 days
+      gracePeriodSeconds: 3600, // 1 hour grace period for old tokens
+      cookieName: "moodio_refresh_token",
+      maxAge: 20 * 24 * 60 * 60, // 20 days in seconds
+    },
+
+    // OTP Configuration
+    otp: {
+      length: 6, // 6-digit numeric code
+      expiresInMinutes: 10, // 10 minutes
+    },
+
+    // Cookie Configuration
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax" as const,
+      path: "/",
+      // In production set AUTH_COOKIE_DOMAIN=.moodio.art to scope cookies across subdomains
+      ...(process.env.AUTH_COOKIE_DOMAIN
+        ? { domain: process.env.AUTH_COOKIE_DOMAIN }
+        : {}),
+    },
+  },
+  
+  // Annotation Platform
+  annotationPlatformUrl:
+    process.env.NEXT_PUBLIC_ANNOTATION_PLATFORM_URL ||
+    "https://admin.moodio.art/admin/browse-shots-admin",
+
+  // Audio Recording Configuration
+  audioRecording: {
+    maxDuration: 120, // 2 minutes in seconds
+    countdownThreshold: 15, // Show countdown 15 seconds before max duration
+  },
+
+  // CloudFront Configuration
+  cloudfront: {
+    signedUrlExpirationSeconds: 30 * 60, // 30 minutes default expiration for legacy signed URLs
+    signedCookieExpirationSeconds: 60 * 60, // 1 hour default expiration for signed cookies
+    signedCookieClockSkewSeconds: 60, // Allow CloudFront policy to outlive cookie by 60s
+    cookieDomain: process.env.CLOUDFRONT_COOKIE_DOMAIN,
+  },
+
+  // PWA Configuration
+  pwa: {
+    enableInstallPrompt: false, // Set to true when icons are ready in /public/icons/
+  },
+
+  // Image Limits Configuration
+  imageLimits: {
+    // Input side: how many images a user can attach
+    maxPendingImages: 10,
+    maxReferenceImages: 4,
+    maxImagesPerMessage: 14,
+    // Output side: how many images the agent/system can generate
+    maxSuggestionsHardCap: 6,
+  },
+
+  // Upload Configuration
+  upload: {
+    maxFileSizeMB: 50,
+    compressThresholdMB: 6,
+    serverCompressThresholdMB: 6,
+    uploadTimeoutMs: 120_000,
+    allowedImageTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
+    allowedVideoTypes: ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo"],
+    allowedAudioTypes: [
+      "audio/mpeg",
+      "audio/mp3",
+      "audio/wav",
+      "audio/wave",
+      "audio/x-wav",
+    ],
+    presignedUrlExpiresIn: 300, // 5 minutes in seconds
+  },
+};

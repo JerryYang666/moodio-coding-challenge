@@ -1,0 +1,59 @@
+'use client';
+
+import React from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import { useTranslations, useLocale } from 'next-intl';
+import type { RootState } from '@/lib/redux/store';
+import { setSelectedFilters, setTextSearch } from '@/lib/redux/slices/querySlice';
+import { useGetPropertiesQuery } from '@/lib/redux/services/api';
+import { FilterChipBar, FilterDescription } from '@/components/browse/FilterChipBar';
+import { useFilterChips } from '@/hooks/use-filter-chips';
+
+const Breadcrumb: React.FC = () => {
+  const t = useTranslations("browse");
+  const locale = useLocale();
+  const dispatch = useDispatch();
+  const { textSearch, selectedFilters } = useSelector((state: RootState) => state.query);
+  const { data: properties } = useGetPropertiesQuery(locale);
+
+  // Build filter name lookup
+  const filterChips = useFilterChips(properties, selectedFilters);
+
+  const contextText = textSearch
+    ? t("showingShotsFor", { query: textSearch })
+    : t("browseAllShots");
+
+  const handleRemoveFilter = (filterId: number) => {
+    const newSelectedFilters = selectedFilters.filter(id => id !== filterId);
+    dispatch(setSelectedFilters(newSelectedFilters));
+  };
+
+  const handleRemoveSearch = () => {
+    dispatch(setTextSearch(''));
+  };
+
+  return (
+    <FilterChipBar
+      contextText={contextText}
+      filterChips={filterChips}
+      onRemoveFilter={handleRemoveFilter}
+      searchTerm={textSearch || undefined}
+      onClearSearch={handleRemoveSearch}
+    />
+  );
+};
+
+/**
+ * Renders the label description for a single selected filter.
+ * Intended to be placed inside a scrollable container.
+ */
+export const BreadcrumbDescription: React.FC = () => {
+  const locale = useLocale();
+  const { textSearch, selectedFilters } = useSelector((state: RootState) => state.query);
+  const { data: properties } = useGetPropertiesQuery(locale);
+  const filterChips = useFilterChips(properties, selectedFilters);
+
+  return <FilterDescription filterChips={filterChips} searchTerm={textSearch || undefined} />;
+};
+
+export default Breadcrumb;

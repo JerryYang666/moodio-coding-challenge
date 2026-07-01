@@ -1,0 +1,357 @@
+import { createApi } from "@reduxjs/toolkit/query/react";
+import type { QueryState } from "../types";
+import { buildApiQueryParams } from "../utils";
+import { createBaseQueryWithReauth } from "./base-query";
+import type { TaxonomyPropertyNode } from "@/lib/filterGrouping";
+
+// Constants
+// Same-origin proxy path — Next.js rewrites /retrieval-api/* to the real Flask
+// backend server-side (see next.config.js), so the browser avoids CORS.
+const API_BASE_URL = "/retrieval-api";
+
+// API Response Types
+// Editorial metadata exposed by the backend retrieval API. Only "title" is
+// guaranteed to be present; other fields vary per content item.
+export interface ContentMetadata {
+  title?: string;
+  directors?: string[];
+  artists?: string[];
+  brands?: string[];
+  agencies?: string[];
+  prompt?: string;
+  [key: string]: unknown; // backend may add fields
+}
+
+export interface Video {
+  id: number;
+  content_uuid: string;
+  storage_key: string;
+  content_type?: string; // "shot", "multishot", "image"
+  is_aigc?: boolean;
+  metadata?: ContentMetadata;
+  width: number;  // Video width in pixels (for justified gallery layout)
+  height: number; // Video height in pixels (for justified gallery layout)
+  created_at: string;
+  captions: string[];
+  properties: Array<{
+    property_id: number;
+    property_name: string;
+    parent_property?: {
+      id: number;
+      name: string;
+    };
+    value_id: number;
+    value: string;
+    confidence_score: number;
+    labeler: string;
+  }>;
+  // Multishot/subshot support
+  parent_content?: {
+    id: number;
+    content_uuid: string;
+    content_type: string;
+  };
+  start_time?: number; // For subshots (in seconds)
+  end_time?: number; // For subshots (in seconds)
+  subshots?: Array<{
+    id: number;
+    content_uuid: string;
+    start_time: number;
+    end_time: number;
+  }>; // For multishots
+}
+
+export interface VideosResponse {
+  content: Video[];
+  videos: Video[];
+  has_more: boolean;
+  total_content: number;
+  total_videos: number;
+  cursor?: string | null;
+  search_id?: string | null;
+  strategy_name?: string | null; // Retrieval strategy identifier (may encode versioning)
+}
+
+export interface PropertyValue {
+  id: number;
+  value: string;
+  description?: string | null;
+  property_id: number | null;
+  display_order?: number | null;
+  hidden?: boolean; // Direct hidden flag
+  effective_hidden?: boolean; // Inherited hidden (via parent property)
+}
+
+// Property can also represent a root-level PropertyValue (when 'value' is present and 'name' is not)
+export interface Property {
+  id: number;
+  name?: string;  // Optional for root-level PropertyValues
+  value?: string;  // Only present for root-level PropertyValues
+  property_id?: number | null;
+  display_order?: number | null;
+  hidden?: boolean; // Direct hidden flag (admin-set)
+  effective_hidden?: boolean; // Inherited hidden (hidden via parent property)
+  values: PropertyValue[];
+  children: Property[]; // Recursive reference for unlimited nesting
+}
+
+export interface ContentLabel {
+  property_value_id: number;
+  value: string;
+  property_path: string | null;
+}
+
+export interface VideoDetail {
+  id: number;
+  content_uuid: string;
+  storage_key: string;
+  width: number;
+  height: number;
+  content_type: string;
+  is_aigc: boolean;
+  metadata?: ContentMetadata;
+  labels: ContentLabel[];
+}
+
+export interface ImageUploadResponse {
+  upload_id: string;
+  mime_type: string;
+}
+
+export interface SimilarityScore {
+  aggregate: number;
+  components: Record<string, number>;
+  weights: Record<string, number>;
+}
+
+export interface SimilarContentItem {
+  id: number;
+  content_uuid: string;
+  storage_key: string;
+  width: number;
+  height: number;
+  content_type: string;
+  is_aigc: boolean;
+  similarity_score?: SimilarityScore;
+}
+
+export interface SimilarContentResponse {
+  content: SimilarContentItem[];
+  total_content: number;
+  strategy_name?: string;
+  anchor?: {
+    id: number;
+    content_type: string;
+    used_caption_types: string[];
+    missing_caption_types: string[];
+  };
+}
+
+export const api = createApi({
+  reducerPath: "api",
+  baseQuery: createBaseQueryWithReauth(API_BASE_URL),
+  tagTypes: ["Videos", "Properties"],
+
+  endpoints: (builder) => ({
+    getVideos: builder.query<VideosResponse, { queryState: QueryState; properties: TaxonomyPropertyNode[] }>({
+      query: ({ queryState, properties }) => {
+        const params = buildApiQueryParams(queryState, properties);
+        return `/content?${params.toString()}`;
+      },
+
+      // Transform backend response to frontend format
+      transformResponse: (response: {
+        content: Video[];
+        has_more: boolean;
+        total_content: number;
+        search_id?: string | null;
+        next_cursor?: string | null;
+        strategy_name?: string | null;
+      }) => ({
+        content: response.content,
+        videos: response.content,
+        has_more: response.has_more,
+        total_content: response.total_content,
+        total_videos: response.total_content,
+        cursor: response.next_cursor ?? null,
+        search_id: response.search_id ?? null,
+        strategy_name: response.strategy_name ?? null,
+      }),
+
+      // Keep unused data for 60 seconds to allow quick navigation back without refetching
+      // This reduces churn and makes returning to the video grid feel more seamless
+      keepUnusedDataFor: 60,
+
+      // Cache based on intent (search+filters), NOT cursor/searchId
+      // This ensures same intent = same cache entry, regardless of pagination state
+      serializeQueryArgs: ({ queryArgs }) => {
+        const { queryState } = queryArgs;
+        const { textSearch, selectedFolders, selectedFilters, contentTypes, isAigc, imageSearchUploadId } = queryState;
+        // Include contentTypes and isAigc in cache key since they affect results
+        // Sort contentTypes array for consistent cache key regardless of selection order
+        const sortedContentTypes = [...contentTypes].sort().join(",");
+        // imageSearchUploadId takes precedence over textSearch for cache differentiation
+        const intentKey = imageSearchUploadId ? `img:${imageSearchUploadId}` : `txt:${textSearch}`;
+        return `videos-${intentKey}-${selectedFolders.join(",")}-${selectedFilters.join(",")}-${sortedContentTypes}-${isAigc ?? ""}`;
+      },
+
+      // Merge pages for infinite scroll functionality
+      // Handles deduplication when searchId changes (session expired/recomputed)
+      merge: (currentCache, newData, { arg }) => {
+        if (!newData?.content) return currentCache;
+
+        // If this is a new search (no cursor), replace cache entirely
+        if (!arg.queryState.cursor) {
+          return newData;
+        }
+
+        // Continuation: append new content, deduplicating by ID
+        // This handles the case where searchId changed (session expired) and we got
+        // some overlapping results from recomputation
+        if (currentCache?.content) {
+          const existingIds = new Set(currentCache.content.map((v) => v.id));
+          const newContent = newData.content.filter((v) => !existingIds.has(v.id));
+          const mergedContent = [...currentCache.content, ...newContent];
+
+          return {
+            ...newData,
+            content: mergedContent,
+            videos: mergedContent, // Keep videos in sync with content
+          };
+        }
+
+        // Fallback: replace cache
+        return newData;
+      },
+
+      // Force refetch when intent changes OR cursor changes
+      // Intent changes: search/filters/contentTypes/isAigc
+      // Cursor changes: user scrolled to next page
+      forceRefetch({ currentArg, previousArg }) {
+        const cur = currentArg?.queryState;
+        const prev = previousArg?.queryState;
+        // Intent changed
+        if (
+          cur?.textSearch !== prev?.textSearch ||
+          cur?.imageSearchUploadId !== prev?.imageSearchUploadId ||
+          JSON.stringify(cur?.selectedFolders) !== JSON.stringify(prev?.selectedFolders) ||
+          JSON.stringify(cur?.selectedFilters) !== JSON.stringify(prev?.selectedFilters) ||
+          JSON.stringify([...(cur?.contentTypes || [])].sort()) !== JSON.stringify([...(prev?.contentTypes || [])].sort()) ||
+          cur?.isAigc !== prev?.isAigc
+        ) {
+          return true;
+        }
+
+        // Cursor changed (pagination)
+        if (cur?.cursor !== prev?.cursor) {
+          return true;
+        }
+
+        return false;
+      },
+
+      async onQueryStarted({ queryState }, { queryFulfilled }) {
+        const metadata: Record<string, unknown> = {
+          query: queryState.textSearch.trim() || null,
+          selectedFilters: queryState.selectedFilters,
+          contentTypes: queryState.contentTypes,
+          isPagination: !!queryState.cursor,
+        };
+        if (queryState.isAigc !== undefined) {
+          metadata.isAigc = queryState.isAigc;
+        }
+
+        try {
+          const { data } = await queryFulfilled;
+          metadata.totalResults = data.total_content;
+          metadata.strategyName = data.strategy_name ?? null;
+        } catch {
+          metadata.failed = true;
+        }
+
+        fetch("/api/telemetry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventType: "retrieval_search", metadata }),
+        }).catch(() => {});
+      },
+    }),
+
+    getVideoDetail: builder.query<VideoDetail, number>({
+      query: (id) => `/content/${id}`,
+      keepUnusedDataFor: 120,
+    }),
+
+    getProperties: builder.query<Property[], string>({
+      query: (lang) => `/properties?lang=${encodeURIComponent(lang)}`,
+      // Cache properties aggressively since they rarely change
+      keepUnusedDataFor: 1800,
+    }),
+
+    uploadImageSearch: builder.mutation<ImageUploadResponse, File>({
+      query: (file) => {
+        const formData = new FormData();
+        formData.append("image", file);
+        return {
+          url: "/upload",
+          method: "POST",
+          body: formData,
+        };
+      },
+    }),
+
+    getSimilarContent: builder.query<SimilarContentResponse, number>({
+      query: (contentId) => `/content/${contentId}/similar`,
+      keepUnusedDataFor: 60,
+    }),
+
+    getInspiration: builder.query<{ term: string }, string>({
+      queryFn: async (locale) => {
+        try {
+          if (typeof window !== "undefined") {
+            const cacheKey = `moodio_inspiration_${locale}`;
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+              try {
+                const { term, timestamp } = JSON.parse(cached);
+                // If generated less than 5 minutes ago, use the cached version
+                if (Date.now() - timestamp < 12 * 60 * 60 * 1000) {
+                  return { data: { term } };
+                }
+              } catch (e) {
+                // Ignore parse errors and fetch fresh
+              }
+            }
+          }
+
+          const res = await fetch(`/api/inspiration?locale=${encodeURIComponent(locale)}`);
+          if (!res.ok) throw new Error("Failed to fetch inspiration");
+          const data = await res.json();
+
+          if (typeof window !== "undefined" && data.term) {
+            const cacheKey = `moodio_inspiration_${locale}`;
+            localStorage.setItem(cacheKey, JSON.stringify({
+              term: data.term,
+              timestamp: Date.now()
+            }));
+          }
+
+          return { data };
+        } catch (error: any) {
+          return { error: { status: 500, data: error.message } };
+        }
+      },
+      // Cache the inspiration term in Redux memory for client-side navigation
+      keepUnusedDataFor: 43200,
+    }),
+  }),
+});
+
+export const {
+  useGetVideosQuery,
+  useGetVideoDetailQuery,
+  useGetPropertiesQuery,
+  useGetInspirationQuery,
+  useUploadImageSearchMutation,
+  useGetSimilarContentQuery,
+} = api;
