@@ -1,13 +1,28 @@
 "use client";
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useTranslations, useLocale } from "next-intl";
 import { motion } from "framer-motion";
 import type { RootState } from "@/lib/redux/store";
 import type { QueryState } from "@/lib/redux/types";
-import { useGetVideosQuery, useGetPropertiesQuery, type Video } from "@/lib/redux/services/api";
-import { setCursor, setSearchId, setSelectedFilters } from "@/lib/redux/slices/querySlice";
+import {
+  useGetVideosQuery,
+  useGetPropertiesQuery,
+  type Video,
+} from "@/lib/redux/services/api";
+import {
+  setCursor,
+  setSearchId,
+  setSelectedFilters,
+} from "@/lib/redux/slices/querySlice";
 import {
   JustifiedGallery,
   type Photo,
@@ -43,7 +58,7 @@ interface VideoGridProps {
   onPhotoClickOverride?: (photo: Photo) => void;
   renderTileOverlay?: (photo: Photo) => React.ReactNode;
   getTileDragProps?: (
-    photo: Photo
+    photo: Photo,
   ) =>
     | (Pick<
         React.HTMLAttributes<HTMLDivElement>,
@@ -52,13 +67,22 @@ interface VideoGridProps {
     | undefined;
 }
 
-const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, descriptionSlot, onPhotoClickOverride, renderTileOverlay, getTileDragProps }) => {
+const VideoGrid: React.FC<VideoGridProps> = ({
+  hideSummary = false,
+  desktopId,
+  descriptionSlot,
+  onPhotoClickOverride,
+  renderTileOverlay,
+  getTileDragProps,
+}) => {
   const t = useTranslations("browse");
   const locale = useLocale();
   const dispatch = useDispatch();
   const cnMode = useUserSetting("cnMode");
   const queryState = useSelector((state: RootState) => state.query);
-  const { handleContextMenu, contextMenuElement } = useAssetContextMenu({ desktopId });
+  const { handleContextMenu, contextMenuElement } = useAssetContextMenu({
+    desktopId,
+  });
 
   // Video detail state
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
@@ -88,16 +112,22 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
     refetch,
     loadMore: handleLoadMore,
     searchKey,
-  } = useInfiniteContent<Video, { queryState: QueryState; properties: typeof properties }>({
+  } = useInfiniteContent<
+    Video,
+    { queryState: QueryState; properties: typeof properties }
+  >({
     useQuery: (params, options) => {
       const result = useGetVideosQuery(params, options);
-      const transformData = (data: typeof result.data) => data ? {
-        content: data.content,
-        has_more: data.has_more,
-        total_content: data.total_content,
-        cursor: data.cursor,
-        search_id: data.search_id,
-      } : undefined;
+      const transformData = (data: typeof result.data) =>
+        data
+          ? {
+              content: data.content,
+              has_more: data.has_more,
+              total_content: data.total_content,
+              cursor: data.cursor,
+              search_id: data.search_id,
+            }
+          : undefined;
       return {
         ...result,
         data: transformData(result.data),
@@ -120,13 +150,17 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
 
     // Extract stale filter IDs from the error payload
     // RTK Query wraps fetch errors in { status, data } shape
-    const errorData = (error as { status?: number; data?: Record<string, unknown> })?.data;
+    const errorData = (
+      error as { status?: number; data?: Record<string, unknown> }
+    )?.data;
     const status = (error as { status?: number })?.status;
 
     if (status !== 400 || !errorData) return;
 
-    const hiddenIds = (errorData.hidden_filter_ids as number[] | undefined) ?? [];
-    const missingIds = (errorData.missing_filter_ids as number[] | undefined) ?? [];
+    const hiddenIds =
+      (errorData.hidden_filter_ids as number[] | undefined) ?? [];
+    const missingIds =
+      (errorData.missing_filter_ids as number[] | undefined) ?? [];
     const staleIds = [...hiddenIds, ...missingIds];
 
     if (staleIds.length === 0) return;
@@ -138,7 +172,9 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
 
     // Sanitize selected filters
     const staleSet = new Set(staleIds);
-    const sanitized = queryState.selectedFilters.filter((id) => !staleSet.has(id));
+    const sanitized = queryState.selectedFilters.filter(
+      (id) => !staleSet.has(id),
+    );
     const removedCount = queryState.selectedFilters.length - sanitized.length;
 
     if (removedCount > 0) {
@@ -154,31 +190,41 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
   }, [error, queryState.selectedFilters, dispatch]);
 
   // Direct mapping - dimensions come from API, no loading phase needed
-  const photos = videos.map((v) => videoToPhoto(v, cnMode));
+  const photos = useMemo(
+    () => videos.map((v) => videoToPhoto(v, cnMode)),
+    [videos, cnMode],
+  );
 
   // Handle photo click — capture rect, start the flying clone
-  const handleClickPhoto = useCallback((photo: Photo) => {
-    if (onPhotoClickOverride) {
-      onPhotoClickOverride(photo);
-      return;
-    }
-    const videoEl = galleryRef.current?.querySelector(
-      `[data-photo-key="${photo.key}"]`
-    );
-    if (videoEl) {
-      setOriginRect(videoEl.getBoundingClientRect());
-      setIsFlying(true);
-    } else {
-      setOriginRect(null);
-    }
-    // Save scroll position so we can restore it when the user returns from detail view
-    savedScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
-    setSelectedPhoto(photo);
-  }, [onPhotoClickOverride]);
+  const handleClickPhoto = useCallback(
+    (photo: Photo) => {
+      if (onPhotoClickOverride) {
+        onPhotoClickOverride(photo);
+        return;
+      }
+      const videoEl = galleryRef.current?.querySelector(
+        `[data-photo-key="${photo.key}"]`,
+      );
+      if (videoEl) {
+        setOriginRect(videoEl.getBoundingClientRect());
+        setIsFlying(true);
+      } else {
+        setOriginRect(null);
+      }
+      // Save scroll position so we can restore it when the user returns from detail view
+      savedScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
+      setSelectedPhoto(photo);
+    },
+    [onPhotoClickOverride],
+  );
 
   // Restore gallery scroll position after closing detail view
   useLayoutEffect(() => {
-    if (!selectedPhoto && scrollContainerRef.current && savedScrollTopRef.current > 0) {
+    if (
+      !selectedPhoto &&
+      scrollContainerRef.current &&
+      savedScrollTopRef.current > 0
+    ) {
       scrollContainerRef.current.scrollTop = savedScrollTopRef.current;
     }
   }, [selectedPhoto]);
@@ -221,7 +267,8 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
     const isStaleFilterError =
       status === 400 &&
       errorData &&
-      (Array.isArray(errorData.hidden_filter_ids) || Array.isArray(errorData.missing_filter_ids));
+      (Array.isArray(errorData.hidden_filter_ids) ||
+        Array.isArray(errorData.missing_filter_ids));
 
     // If it's a stale-filter error, show spinner while recovery effect runs
     if (isStaleFilterError) {
@@ -234,7 +281,9 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
 
     return (
       <div className="text-center py-12">
-        <div className="text-danger text-lg mb-2">{t("errorLoadingVideos")}</div>
+        <div className="text-danger text-lg mb-2">
+          {t("errorLoadingVideos")}
+        </div>
         <p className="text-default-500 text-sm mb-4">
           {t("errorLoadingVideosDesc")}
         </p>
@@ -261,10 +310,10 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
   if (videos.length === 0) {
     return (
       <div className="text-center py-12">
-        <div className="text-default-500 text-lg mb-2">{t("noVideosFound")}</div>
-        <p className="text-default-400 text-sm">
-          {t("noVideosFoundDesc")}
-        </p>
+        <div className="text-default-500 text-lg mb-2">
+          {t("noVideosFound")}
+        </div>
+        <p className="text-default-400 text-sm">{t("noVideosFoundDesc")}</p>
       </div>
     );
   }
@@ -274,10 +323,18 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
       {/* Results summary — sticky at the top, hidden when detail is open */}
       {!hideSummary && !selectedPhoto && (
         <div className="mb-1 text-xs text-default-500 shrink-0 bg-background py-1">
-          {t("showingCount", { current: videos.length, more: hasMore ? "+" : "", total: totalItems })}
-          {queryState.textSearch.trim() && queryState.selectedFilters.length > 0 && (
-            <span className="text-default-400"> · {t("matchingAnyFilter")}</span>
-          )}
+          {t("showingCount", {
+            current: videos.length,
+            more: hasMore ? "+" : "",
+            total: totalItems,
+          })}
+          {queryState.textSearch.trim() &&
+            queryState.selectedFilters.length > 0 && (
+              <span className="text-default-400">
+                {" "}
+                · {t("matchingAnyFilter")}
+              </span>
+            )}
         </div>
       )}
 
@@ -288,8 +345,28 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
           hasMore={hasMore}
           isLoading={isFetching}
           onLoadMore={handleLoadMore}
-          threshold={800}
+          threshold={2000}
           resetKey={searchKey}
+          loader={
+            <div className="w-full flex items-start gap-1.5 py-1">
+              {[0, 1, 2, 3].map((col) => (
+                <div key={col} className="flex-1 min-w-0 flex flex-col gap-1.5">
+                  <div
+                    className="w-full bg-neutral-300 dark:bg-neutral-700 animate-pulse rounded-[20px]"
+                    style={{ aspectRatio: "0.75" }}
+                  />
+                  <div
+                    className="w-full bg-neutral-300 dark:bg-neutral-700 animate-pulse rounded-[20px]"
+                    style={{ aspectRatio: "1.33" }}
+                  />
+                  <div
+                    className="w-full bg-neutral-300 dark:bg-neutral-700 animate-pulse rounded-[20px]"
+                    style={{ aspectRatio: "0.56" }}
+                  />
+                </div>
+              ))}
+            </div>
+          }
         >
           {/* Label description scrolls with the content */}
           {descriptionSlot}

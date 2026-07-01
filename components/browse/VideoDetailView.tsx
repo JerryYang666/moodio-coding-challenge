@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useRef, useLayoutEffect, useEffect, useMemo, useState, useCallback } from "react";
+import React, {
+  useRef,
+  useLayoutEffect,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
 import { useTranslations } from "next-intl";
 import { motion } from "framer-motion";
 import { Button } from "@heroui/button";
@@ -63,8 +70,9 @@ const ACTION_ICONS = {
   desktop: LayoutDashboard,
 } as const;
 
-
-function groupLabelsByProperty(labels: ContentLabel[]): Record<string, string[]> {
+function groupLabelsByProperty(
+  labels: ContentLabel[],
+): Record<string, string[]> {
   const groups: Record<string, string[]> = {};
   for (const label of labels) {
     const path = label.property_path;
@@ -108,7 +116,7 @@ interface VideoDetailViewProps {
 
 const similarItemToPhoto = (
   item: SimilarContentItem,
-  cnMode: boolean
+  cnMode: boolean,
 ): Photo & { similarityAggregate?: number } => ({
   src: getContentUrl(item.storage_key, cnMode),
   width: item.width,
@@ -141,7 +149,8 @@ export function VideoDetailView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const currentPhoto = photoStack.length > 0 ? photoStack[photoStack.length - 1] : selectedPhoto;
+  const currentPhoto =
+    photoStack.length > 0 ? photoStack[photoStack.length - 1] : selectedPhoto;
 
   const handleSimilarClick = useCallback((photo: Photo) => {
     setPhotoStack((prev) => [...prev, photo]);
@@ -196,7 +205,22 @@ function VideoDetailContent({
   const cnMode = useUserSetting("cnMode");
   const detail: VideoDetailData = MOCK_VIDEO_DETAIL;
   const videoTargetRef = useRef<HTMLDivElement>(null);
-  const { data: videoDetail, isLoading: isLoadingDetail } = useGetVideoDetailQuery(selectedPhoto.id);
+  const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const { data: videoDetail, isLoading: isLoadingDetail } =
+    useGetVideoDetailQuery(selectedPhoto.id);
+
+  // Release the main video's media resources on unmount.
+  // Safari does not reliably GC <video> media pipelines when the element is
+  // removed from the DOM, causing progressive resource leaks across navigations.
+  useEffect(() => {
+    return () => {
+      const video = mainVideoRef.current;
+      if (!video) return;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, []);
   const {
     data: similarData,
     isLoading: isLoadingSimilar,
@@ -205,8 +229,11 @@ function VideoDetailContent({
   const tCollections = useTranslations("collections");
 
   const similarPhotos = useMemo(
-    () => (similarData?.content ?? []).map((item) => similarItemToPhoto(item, cnMode)),
-    [similarData, cnMode]
+    () =>
+      (similarData?.content ?? []).map((item) =>
+        similarItemToPhoto(item, cnMode),
+      ),
+    [similarData, cnMode],
   );
   const missingCaptionTypes = similarData?.anchor?.missing_caption_types ?? [];
 
@@ -239,16 +266,22 @@ function VideoDetailContent({
     return groupLabelsByProperty(videoDetail.labels);
   }, [videoDetail?.labels]);
 
-  const labelEntries = useMemo(() => Object.entries(groupedLabels), [groupedLabels]);
+  const labelEntries = useMemo(
+    () => Object.entries(groupedLabels),
+    [groupedLabels],
+  );
 
   const heading = useMemo(
     () => extractVideoDetailHeading(videoDetail?.metadata),
-    [videoDetail?.metadata]
+    [videoDetail?.metadata],
   );
 
   const chatActions = useMemo(
-    () => detail.actions.filter((a) => a.icon !== "collection" && a.icon !== "desktop"),
-    [detail.actions]
+    () =>
+      detail.actions.filter(
+        (a) => a.icon !== "collection" && a.icon !== "desktop",
+      ),
+    [detail.actions],
   );
 
   useLayoutEffect(() => {
@@ -257,17 +290,30 @@ function VideoDetailContent({
     }
   }, [onTargetReady]);
 
-  const videoTitle = videoDetail?.content_uuid ?? selectedPhoto.videoName ?? "Untitled";
+  const videoTitle =
+    videoDetail?.content_uuid ?? selectedPhoto.videoName ?? "Untitled";
   const storageKey = videoDetail?.storage_key ?? "";
   const contentUuid = videoDetail?.content_uuid ?? "";
-  const mediaType = normalizeMediaType(videoDetail?.content_type ?? selectedPhoto.mediaType);
+  const mediaType = normalizeMediaType(
+    videoDetail?.content_type ?? selectedPhoto.mediaType,
+  );
   const isImageContent = isImageContentType(mediaType);
 
   const handleAddToCollection = async (collectionId: string) => {
     if (!storageKey || !contentUuid) return;
     const success = isImageContent
-      ? await addPublicImageToCollection(collectionId, storageKey, contentUuid, videoTitle)
-      : await addPublicVideoToCollection(collectionId, storageKey, contentUuid, videoTitle);
+      ? await addPublicImageToCollection(
+          collectionId,
+          storageKey,
+          contentUuid,
+          videoTitle,
+        )
+      : await addPublicVideoToCollection(
+          collectionId,
+          storageKey,
+          contentUuid,
+          videoTitle,
+        );
     if (success) {
       addToast({
         title: "Added to collection",
@@ -290,8 +336,18 @@ function VideoDetailContent({
       const collection = await createCollection(newCollectionName.trim());
       if (collection) {
         const success = isImageContent
-          ? await addPublicImageToCollection(collection.id, storageKey, contentUuid, videoTitle)
-          : await addPublicVideoToCollection(collection.id, storageKey, contentUuid, videoTitle);
+          ? await addPublicImageToCollection(
+              collection.id,
+              storageKey,
+              contentUuid,
+              videoTitle,
+            )
+          : await addPublicVideoToCollection(
+              collection.id,
+              storageKey,
+              contentUuid,
+              videoTitle,
+            );
         if (success) {
           addToast({
             title: "Added to collection",
@@ -303,14 +359,23 @@ function VideoDetailContent({
         onCreateCollectionOpenChange();
       }
     } catch (error: any) {
-      const msg = error?.status === 409 ? tCollections("duplicateName") : tCollections("createFailed");
-      addToast({ title: tCollections("error"), description: msg, color: "danger" });
+      const msg =
+        error?.status === 409
+          ? tCollections("duplicateName")
+          : tCollections("createFailed");
+      addToast({
+        title: tCollections("error"),
+        description: msg,
+        color: "danger",
+      });
     } finally {
       setIsCreating(false);
     }
   };
 
-  const writableCollections = collections.filter((c) => hasWriteAccess(c.permission));
+  const writableCollections = collections.filter((c) =>
+    hasWriteAccess(c.permission),
+  );
 
   return (
     <div className="w-full @container">
@@ -325,9 +390,13 @@ function VideoDetailContent({
             style={{
               aspectRatio: `${selectedPhoto.width} / ${selectedPhoto.height}`,
             }}
-            onContextMenu={onContextMenu ? (e) => onContextMenu(selectedPhoto, e) : undefined}
+            onContextMenu={
+              onContextMenu ? (e) => onContextMenu(selectedPhoto, e) : undefined
+            }
           >
-            <div className={`w-full h-full ${videoVisible ? "visible" : "invisible"}`}>
+            <div
+              className={`w-full h-full ${videoVisible ? "visible" : "invisible"}`}
+            >
               {isImageContent ? (
                 <img
                   src={selectedPhoto.src}
@@ -336,6 +405,7 @@ function VideoDetailContent({
                 />
               ) : (
                 <video
+                  ref={mainVideoRef}
                   src={selectedPhoto.src}
                   className="w-full h-full object-cover"
                   autoPlay
@@ -380,7 +450,11 @@ function VideoDetailContent({
                     </DropdownItem>
                   </DropdownSection>
                   <DropdownSection
-                    title={writableCollections.length > 0 ? "Your Collections" : undefined}
+                    title={
+                      writableCollections.length > 0
+                        ? "Your Collections"
+                        : undefined
+                    }
                   >
                     {writableCollections.length === 0 ? (
                       <DropdownItem key="no-collections" isReadOnly>
@@ -432,10 +506,14 @@ function VideoDetailContent({
             ) : (
               <>
                 {heading.primary && (
-                  <h2 className="text-xl font-bold text-foreground mb-0.5">{heading.primary}</h2>
+                  <h2 className="text-xl font-bold text-foreground mb-0.5">
+                    {heading.primary}
+                  </h2>
                 )}
                 {heading.secondary && (
-                  <p className="text-sm text-default-400 dark:text-default-500">{heading.secondary}</p>
+                  <p className="text-sm text-default-400 dark:text-default-500">
+                    {heading.secondary}
+                  </p>
                 )}
               </>
             )}
@@ -452,18 +530,29 @@ function VideoDetailContent({
                   className="justify-center gap-3 items-center border-default-300 dark:border-default-500 text-default-700 dark:text-default-600 hover:bg-default-100 dark:hover:bg-white/10 w-full"
                   startContent={<Icon size={18} />}
                   isDisabled={!videoDetail || isLoadingDetail || isImageContent}
-                  onPress={videoDetail && !isImageContent ? () => {
-                    const factory = BROWSE_VIDEO_ACTIONS[action.icon];
-                    if (factory) {
-                      const bubble = factory({
-                        contentId: videoDetail.id,
-                        contentUuid: videoDetail.content_uuid,
-                        storageKey: videoDetail.storage_key,
-                        videoUrl: getContentUrl(videoDetail.storage_key, cnMode),
-                      });
-                      dispatchSuggestionBubble(bubble.action, bubble.label, bubble.icon);
-                    }
-                  } : undefined}
+                  onPress={
+                    videoDetail && !isImageContent
+                      ? () => {
+                          const factory = BROWSE_VIDEO_ACTIONS[action.icon];
+                          if (factory) {
+                            const bubble = factory({
+                              contentId: videoDetail.id,
+                              contentUuid: videoDetail.content_uuid,
+                              storageKey: videoDetail.storage_key,
+                              videoUrl: getContentUrl(
+                                videoDetail.storage_key,
+                                cnMode,
+                              ),
+                            });
+                            dispatchSuggestionBubble(
+                              bubble.action,
+                              bubble.label,
+                              bubble.icon,
+                            );
+                          }
+                        }
+                      : undefined
+                  }
                 >
                   {action.label}
                 </Button>
@@ -472,7 +561,9 @@ function VideoDetailContent({
           </div>
 
           <div className="mb-1">
-            <span className="text-xs text-default-400 dark:text-default-500">Topics to ask agent:</span>
+            <span className="text-xs text-default-400 dark:text-default-500">
+              Topics to ask agent:
+            </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {detail.topics.map((topic) => (
@@ -501,7 +592,11 @@ function VideoDetailContent({
         ) : labelEntries.length > 0 ? (
           <div className="grid grid-cols-1 @md:grid-cols-3 gap-x-8 gap-y-1">
             {labelEntries.map(([group, values]) => (
-              <MetadataItem key={group} label={group} value={values.join(", ")} />
+              <MetadataItem
+                key={group}
+                label={group}
+                value={values.join(", ")}
+              />
             ))}
           </div>
         ) : null}
@@ -524,10 +619,15 @@ function VideoDetailContent({
           )}
         </div>
 
-        {(isLoadingSimilar || isFetchingSimilar) && similarPhotos.length === 0 ? (
-          <div className="text-sm text-default-400 py-4">Finding similar items…</div>
+        {(isLoadingSimilar || isFetchingSimilar) &&
+        similarPhotos.length === 0 ? (
+          <div className="text-sm text-default-400 py-4">
+            Finding similar items…
+          </div>
         ) : similarPhotos.length === 0 ? (
-          <div className="text-sm text-default-400 py-4">No similar items found.</div>
+          <div className="text-sm text-default-400 py-4">
+            No similar items found.
+          </div>
         ) : (
           <VideoVisibilityProvider>
             <JustifiedGallery
@@ -542,7 +642,10 @@ function VideoDetailContent({
       </motion.div>
 
       {/* Create Collection Modal */}
-      <Modal isOpen={isCreateCollectionOpen} onOpenChange={onCreateCollectionOpenChange}>
+      <Modal
+        isOpen={isCreateCollectionOpen}
+        onOpenChange={onCreateCollectionOpenChange}
+      >
         <ModalContent>
           {(onClose) => (
             <>
@@ -582,20 +685,24 @@ function VideoDetailContent({
         isOpen={isDesktopOpen}
         onOpenChange={onDesktopOpenChange}
         desktopId={desktopId}
-        assets={videoDetail ? [
-          {
-            assetType: isImageContent
-              ? ("public_image" as const)
-              : ("public_video" as const),
-            metadata: {
-              storageKey: videoDetail.storage_key,
-              contentUuid: videoDetail.content_uuid,
-              title: videoTitle,
-              width: selectedPhoto.width,
-              height: selectedPhoto.height,
-            },
-          },
-        ] : []}
+        assets={
+          videoDetail
+            ? [
+                {
+                  assetType: isImageContent
+                    ? ("public_image" as const)
+                    : ("public_video" as const),
+                  metadata: {
+                    storageKey: videoDetail.storage_key,
+                    contentUuid: videoDetail.content_uuid,
+                    title: videoTitle,
+                    width: selectedPhoto.width,
+                    height: selectedPhoto.height,
+                  },
+                },
+              ]
+            : []
+        }
       />
     </div>
   );

@@ -22,29 +22,38 @@ export interface VirtualInfiniteScrollProps {
  * - Shows loading indicator only at the bottom
  * - Prevents multiple simultaneous loads
  */
-export const VirtualInfiniteScroll = forwardRef<HTMLDivElement, VirtualInfiniteScrollProps>(function VirtualInfiniteScroll({
-  children,
-  hasMore,
-  isLoading,
-  onLoadMore,
-  loader,
-  endMessage,
-  className = "",
-  threshold = 800,
-  useWindowScroll = false,
-  resetKey,
-}, externalRef) {
+export const VirtualInfiniteScroll = forwardRef<
+  HTMLDivElement,
+  VirtualInfiniteScrollProps
+>(function VirtualInfiniteScroll(
+  {
+    children,
+    hasMore,
+    isLoading,
+    onLoadMore,
+    loader,
+    endMessage,
+    className = "",
+    threshold = 800,
+    useWindowScroll = false,
+    resetKey,
+  },
+  externalRef,
+) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const setContainerRef = useCallback((node: HTMLDivElement | null) => {
-    containerRef.current = node;
-    if (typeof externalRef === "function") {
-      externalRef(node);
-    } else if (externalRef) {
-      externalRef.current = node;
-    }
-  }, [externalRef]);
+  const setContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      if (typeof externalRef === "function") {
+        externalRef(node);
+      } else if (externalRef) {
+        externalRef.current = node;
+      }
+    },
+    [externalRef],
+  );
   const lastLoadTimeRef = useRef<number>(0);
   const previousResetKeyRef = useRef(resetKey);
 
@@ -82,7 +91,6 @@ export const VirtualInfiniteScroll = forwardRef<HTMLDivElement, VirtualInfiniteS
     onLoadMore();
   }, [hasMore, isLoading, onLoadMore]);
 
-
   // Set up IntersectionObserver for the sentinel element
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -99,7 +107,7 @@ export const VirtualInfiniteScroll = forwardRef<HTMLDivElement, VirtualInfiniteS
         root: useWindowScroll ? null : containerRef.current,
         rootMargin: `${threshold}px`,
         threshold: 0,
-      }
+      },
     );
 
     observer.observe(sentinel);
@@ -121,13 +129,20 @@ export const VirtualInfiniteScroll = forwardRef<HTMLDivElement, VirtualInfiniteS
     const checkAndLoad = () => {
       const sentinel = sentinelRef.current;
       const container = containerRef.current;
-      if (!sentinel) return;
+      if (!sentinel || !container) return;
+
+      // Skip when the container is hidden (e.g., display:none when detail view is open).
+      // When hidden, getBoundingClientRect returns all zeros, which would falsely
+      // pass the visibility check below and trigger unnecessary page loads.
+      if (container.clientHeight === 0) return;
 
       const root = useWindowScroll ? null : container;
-      const rootRect = root ? root.getBoundingClientRect() : {
-        top: 0,
-        bottom: window.innerHeight,
-      };
+      const rootRect = root
+        ? root.getBoundingClientRect()
+        : {
+            top: 0,
+            bottom: window.innerHeight,
+          };
       const sentinelRect = sentinel.getBoundingClientRect();
 
       // Check if sentinel is within viewport + threshold
@@ -159,7 +174,15 @@ export const VirtualInfiniteScroll = forwardRef<HTMLDivElement, VirtualInfiniteS
     <div
       ref={setContainerRef}
       className={useWindowScroll ? className : `overflow-y-auto ${className}`}
-      style={useWindowScroll ? { position: "relative" } : { height: "100%", position: "relative", overflowAnchor: "auto" as const }}
+      style={
+        useWindowScroll
+          ? { position: "relative" }
+          : {
+              height: "100%",
+              position: "relative",
+              overflowAnchor: "auto" as const,
+            }
+      }
     >
       {children}
 

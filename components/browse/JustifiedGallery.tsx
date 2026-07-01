@@ -30,7 +30,7 @@ export interface JustifiedGalleryProps {
   hasMore?: boolean;
   renderOverlay?: (photo: Photo) => React.ReactNode;
   getTileDragProps?: (
-    photo: Photo
+    photo: Photo,
   ) =>
     | (Pick<
         React.HTMLAttributes<HTMLDivElement>,
@@ -48,7 +48,7 @@ const getColumnCount = (containerWidth: number): number => {
 
 const distributeIntoColumns = (
   photos: Photo[],
-  columnCount: number
+  columnCount: number,
 ): Photo[][] => {
   const columns: Photo[][] = Array.from({ length: columnCount }, () => []);
   const heights = new Float64Array(columnCount);
@@ -59,13 +59,13 @@ const distributeIntoColumns = (
       if (heights[i] < heights[shortest]) shortest = i;
     }
     columns[shortest].push(photo);
-    heights[shortest] += (photo.height / photo.width) + (photo.footerHeight ?? 0);
+    heights[shortest] += photo.height / photo.width + (photo.footerHeight ?? 0);
   }
 
   return columns;
 };
 
-export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
+export const JustifiedGallery = React.memo(function JustifiedGallery({
   photos,
   spacing = 6,
   onClick,
@@ -73,7 +73,7 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
   onHeightChange,
   renderOverlay,
   getTileDragProps,
-}) => {
+}: JustifiedGalleryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -92,7 +92,7 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
   const columnCount = containerWidth > 0 ? getColumnCount(containerWidth) : 0;
   const columns = useMemo(
     () => (columnCount > 0 ? distributeIntoColumns(photos, columnCount) : []),
-    [photos, columnCount]
+    [photos, columnCount],
   );
 
   useEffect(() => {
@@ -118,7 +118,9 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
               key={photo.key}
               className="relative flex flex-col"
               data-photo-key={photo.key}
-              onContextMenu={onContextMenu ? (e) => onContextMenu(photo, e) : undefined}
+              onContextMenu={
+                onContextMenu ? (e) => onContextMenu(photo, e) : undefined
+              }
               {...(getTileDragProps?.(photo) ?? {})}
             >
               <LazyVideo
@@ -139,4 +141,4 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
       ))}
     </div>
   );
-};
+});
