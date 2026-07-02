@@ -34,6 +34,7 @@ import {
 import { JustifiedGallery, type Photo } from "./JustifiedGallery";
 import { Squircle } from "@/components/Squircle";
 import { VideoVisibilityProvider } from "@/hooks/use-video-visibility";
+import { useReleasingVideoRef } from "@/hooks/use-video-teardown";
 import {
   MOCK_VIDEO_DETAIL,
   extractVideoDetailHeading,
@@ -196,6 +197,7 @@ function VideoDetailContent({
   const cnMode = useUserSetting("cnMode");
   const detail: VideoDetailData = MOCK_VIDEO_DETAIL;
   const videoTargetRef = useRef<HTMLDivElement>(null);
+  const heroVideoRef = useReleasingVideoRef(selectedPhoto.src);
   const { data: videoDetail, isLoading: isLoadingDetail } = useGetVideoDetailQuery(selectedPhoto.id);
   const {
     data: similarData,
@@ -336,7 +338,7 @@ function VideoDetailContent({
                 />
               ) : (
                 <video
-                  src={selectedPhoto.src}
+                  ref={heroVideoRef}
                   className="w-full h-full object-cover"
                   autoPlay
                   loop

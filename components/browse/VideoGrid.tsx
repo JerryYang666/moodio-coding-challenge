@@ -19,6 +19,7 @@ import { getContentUrl } from "@/lib/config/video.config";
 import { useUserSetting } from "@/lib/user-settings";
 import { useInfiniteContent } from "@/lib/redux/hooks/useInfiniteContent";
 import { VideoVisibilityProvider } from "@/hooks/use-video-visibility";
+import { useReleasingVideoRef } from "@/hooks/use-video-teardown";
 import { useAssetContextMenu } from "@/hooks/use-asset-context-menu";
 import { Loader2 } from "lucide-react";
 import { addToast } from "@heroui/toast";
@@ -68,6 +69,8 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
   const galleryRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const savedScrollTopRef = useRef<number>(0);
+  // Flying-clone video: manages its own src + releases the decoder on unmount.
+  const flyingCloneVideoRef = useReleasingVideoRef(selectedPhoto?.src ?? "");
 
   // Fetch taxonomy properties for grouped filter contract
   const { data: properties = [] } = useGetPropertiesQuery(locale);
@@ -301,6 +304,7 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
                 onClick={handleClickPhoto}
                 onContextMenu={handleContextMenu}
                 hasMore={hasMore}
+                frozen={!!selectedPhoto}
                 renderOverlay={renderTileOverlay}
                 getTileDragProps={getTileDragProps}
               />
@@ -362,7 +366,7 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
               />
             ) : (
               <video
-                src={selectedPhoto.src}
+                ref={flyingCloneVideoRef}
                 className="w-full h-full object-cover"
                 autoPlay
                 loop
