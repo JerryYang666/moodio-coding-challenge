@@ -35,6 +35,12 @@ export interface JustifiedGalleryProps {
   onContextMenu?: (photo: Photo, e: React.MouseEvent) => void;
   onHeightChange?: (height: number) => void;
   hasMore?: boolean;
+  /**
+   * When true the gallery is temporarily hidden (e.g. behind an open detail
+   * view). The mounted window is frozen and tiles keep their loaded videos so
+   * returning is instant rather than re-mounting/re-loading the grid.
+   */
+  frozen?: boolean;
   renderOverlay?: (photo: Photo) => React.ReactNode;
   getTileDragProps?: (
     photo: Photo
@@ -128,6 +134,7 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
   onClick,
   onContextMenu,
   onHeightChange,
+  frozen = false,
   renderOverlay,
   getTileDragProps,
 }) => {
@@ -136,6 +143,11 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
   const [containerWidth, setContainerWidth] = useState(0);
   // Visible window in gallery-local coordinates (px from the gallery's top).
   const [range, setRange] = useState({ top: 0, bottom: 0 });
+  // Read the latest `frozen` inside stable callbacks without re-creating them.
+  const frozenRef = useRef(frozen);
+  useEffect(() => {
+    frozenRef.current = frozen;
+  }, [frozen]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -168,6 +180,10 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
 
   // Recompute the visible window from the current scroll position.
   const recomputeRange = useCallback(() => {
+    // Frozen: the gallery is hidden (detail open). Its rect would measure 0 and
+    // wrongly cull every tile, unmounting them. Keep the last window instead.
+    if (frozenRef.current) return;
+
     const gallery = containerRef.current;
     const sp = scrollParentRef.current;
     if (!gallery || !sp) return;
@@ -217,6 +233,15 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
     onHeightChange?.(totalHeight);
   }, [columns, totalHeight, recomputeRange, onHeightChange]);
 
+  // On unfreeze (returning from detail), recompute AFTER the parent restores
+  // scrollTop — rAF runs post-commit, so the window matches the restored
+  // position instead of the transient pre-restore one.
+  useEffect(() => {
+    if (frozen) return;
+    const id = requestAnimationFrame(recomputeRange);
+    return () => cancelAnimationFrame(id);
+  }, [frozen, recomputeRange]);
+
   return (
     <div
       ref={containerRef}
@@ -253,6 +278,7 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
                   mediaType={photo.mediaType}
                   aspectRatio={photo.width / photo.height}
                   onClick={() => onClick?.(photo)}
+                  frozen={frozen}
                 />
                 {renderOverlay?.(photo)}
                 {photo.footer && (

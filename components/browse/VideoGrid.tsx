@@ -304,6 +304,7 @@ const VideoGrid: React.FC<VideoGridProps> = ({ hideSummary = false, desktopId, d
                 onClick={handleClickPhoto}
                 onContextMenu={handleContextMenu}
                 hasMore={hasMore}
+                frozen={!!selectedPhoto}
                 renderOverlay={renderTileOverlay}
                 getTileDragProps={getTileDragProps}
               />

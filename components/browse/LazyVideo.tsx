@@ -20,6 +20,12 @@ export interface LazyVideoProps {
     className?: string;
     /** Click handler */
     onClick?: () => void;
+    /**
+     * When true the video is only *temporarily* hidden (e.g. the grid is behind
+     * an open detail view). Playback pauses, but the src is kept loaded so
+     * returning is instant instead of re-fetching/re-decoding everything.
+     */
+    frozen?: boolean;
 }
 
 /**
@@ -43,6 +49,7 @@ export function LazyVideo({
     aspectRatio,
     className = "",
     onClick,
+    frozen = false,
 }: LazyVideoProps) {
     const isImage = isImageContentType(mediaType);
     const isFluid = aspectRatio != null;
@@ -82,6 +89,11 @@ export function LazyVideo({
     // Handle src UNLOADING when video enters far zone
     // This releases browser media resources for videos far from viewport
     useEffect(() => {
+        // While frozen the grid is just hidden behind the detail view — every
+        // tile reports "far" (display:none), but we must NOT unload, or
+        // returning would re-fetch the whole grid and flash skeletons.
+        if (frozen) return;
+
         const video = videoRef.current;
         if (!video) return;
 
@@ -93,7 +105,7 @@ export function LazyVideo({
             hasSrcRef.current = false;
             setIsLoaded(false); // Show skeleton again when re-entering
         }
-    }, [isFarFromViewport]);
+    }, [isFarFromViewport, frozen]);
 
     // Handle src loading when video enters near-viewport zone (for scrolling)
     useEffect(() => {
@@ -112,7 +124,7 @@ export function LazyVideo({
         const video = videoRef.current;
         if (!video || !hasSrcRef.current) return;
 
-        const shouldPlay = isVisible && isTabVisible;
+        const shouldPlay = isVisible && isTabVisible && !frozen;
         const isTabResume = isTabVisible && !prevTabVisibleRef.current;
         prevTabVisibleRef.current = isTabVisible;
 
@@ -135,10 +147,10 @@ export function LazyVideo({
                 playVideo();
             }
         } else {
-            // Pause the video when not visible or tab hidden
+            // Pause the video when not visible, tab hidden, or frozen
             video.pause();
         }
-    }, [isVisible, isTabVisible]);
+    }, [isVisible, isTabVisible, frozen]);
 
     // Release media resources on unmount. WebKit doesn't reclaim a <video>'s
     // decoder when the element is removed from the DOM, so without this the
