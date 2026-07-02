@@ -140,6 +140,24 @@ export function LazyVideo({
         }
     }, [isVisible, isTabVisible]);
 
+    // Release media resources on unmount. WebKit doesn't reclaim a <video>'s
+    // decoder when the element is removed from the DOM, so without this the
+    // grid/similar-shot videos leak decoders every time the detail view closes,
+    // making Safari/iOS progressively janky. Empty deps → runs only on unmount.
+    useEffect(() => {
+        const video = videoRef.current;
+        return () => {
+            if (!video) return;
+            try {
+                video.pause();
+                video.removeAttribute("src");
+                video.load();
+            } catch {
+                // Ignore — element may already be gone.
+            }
+        };
+    }, []);
+
     // Handle video error
     const handleError = useCallback(() => {
         console.error(`Failed to load video: ${src}`);

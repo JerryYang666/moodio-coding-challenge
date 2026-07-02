@@ -95,6 +95,12 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
     [photos, columnCount]
   );
 
+  // Width of a single column, used to pre-compute each tile's intrinsic height
+  // for `content-visibility: auto` (below). Without a correct intrinsic size,
+  // off-screen tiles would collapse and break scroll height/restoration.
+  const columnWidth =
+    columnCount > 0 ? (containerWidth - (columnCount - 1) * spacing) / columnCount : 0;
+
   useEffect(() => {
     if (containerRef.current && onHeightChange) {
       onHeightChange(containerRef.current.scrollHeight);
@@ -113,11 +119,29 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
           className="flex-1 min-w-0 flex flex-col"
           style={{ gap: spacing }}
         >
-          {column.map((photo) => (
+          {column.map((photo) => {
+            // Skip layout/paint for off-screen tiles. On Safari each on-screen
+            // <video> is an expensive compositing layer, so painting hundreds of
+            // them while scrolling is the main source of grid stutter. The
+            // intrinsic size keeps total scroll height (and restored scroll
+            // position) exact even though off-screen tiles aren't rendered.
+            const intrinsicHeight =
+              columnWidth > 0
+                ? Math.round(columnWidth * (photo.height / photo.width)) + (photo.footerHeight ?? 0)
+                : 0;
+            return (
             <Squircle
               key={photo.key}
               className="relative flex flex-col"
               data-photo-key={photo.key}
+              style={
+                intrinsicHeight > 0
+                  ? {
+                      contentVisibility: "auto",
+                      containIntrinsicSize: `${Math.round(columnWidth)}px ${intrinsicHeight}px`,
+                    }
+                  : undefined
+              }
               onContextMenu={onContextMenu ? (e) => onContextMenu(photo, e) : undefined}
               {...(getTileDragProps?.(photo) ?? {})}
             >
@@ -134,7 +158,8 @@ export const JustifiedGallery: React.FC<JustifiedGalleryProps> = ({
                 </div>
               )}
             </Squircle>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
